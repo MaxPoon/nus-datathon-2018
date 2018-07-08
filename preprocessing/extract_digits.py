@@ -117,7 +117,7 @@ def get_digits(img):
 
 
 def get_md(img):
-	area = (3000, 3100, 3300, 3200)
+	area = (3000, 3100, 3270, 3200)
 	try:
 		md = pytesseract.image_to_string(img.crop(area), config='-psm 6')
 		md = ''.join([c for c in md if c == '-' or c == "'" or c == '.' or c.isdigit()])
@@ -128,7 +128,8 @@ def get_md(img):
 
 
 def get_datetime(datetime_str):
-	return datetime(datetime_str[:4], datetime_str[4:6], datetime_str[6:])
+	return datetime(int(datetime_str[:4]), int(datetime_str[4:6]), int(datetime_str[6:]))
+
 
 def get_data_for_patient(patient_id):
 	try:
@@ -140,9 +141,10 @@ def get_data_for_patient(patient_id):
 	# sort by dates
 	file_names = sorted(file_names, key=lambda file_name: file_name.replace('__', '_').replace('__', '_').split('_')[1])
 	data = []
+	first_md, last_md = None, None
+	first_date, last_date = None, None
+	num_of_reliable_images = 0
 	for file_name in file_names:
-		if len(data) == 2:
-			break
 		file_name_ = file_name.replace('__', '_').replace('__', '_')
 		date = file_name_.split('_')[1]
 		img = Image.open('JPEG/'+str(patient_id)+'/'+file_name)
@@ -151,22 +153,29 @@ def get_data_for_patient(patient_id):
 		fixation_losses, false_pos_errors, false_neg_errors, reliability = get_data(img)
 		if not reliability:
 			continue
+		num_of_reliable_images += 1
 		md = get_md(img)
 		if not md:
 			continue
-		digits = get_digits(img)
-		if digits:
-			data_dict = {
-				'fixation_losses_' + str(len(data) + 1): fixation_losses,
-				'false_pos_errors_' + str(len(data) + 1): false_pos_errors,
-				'false_neg_errors_' + str(len(data) + 1): false_neg_errors,
-				'date_'+str(len(data) + 1): date,
-				'md_'+str(len(data) + 1): md
-			}
-			for j, digit in enumerate(digits):
-				data_dict['image_'+str(len(data) + 1)+'_digit_' + str(j + 1)] = digit
-			data.append(data_dict)
-	if len(data) == 2:
+		if first_md is None:
+			first_md = md
+			first_date = date
+		last_md = md
+		last_date = date
+		if len(data) < 2:
+			digits = get_digits(img)
+			if digits:
+				data_dict = {
+					'fixation_losses_' + str(len(data) + 1): fixation_losses,
+					'false_pos_errors_' + str(len(data) + 1): false_pos_errors,
+					'false_neg_errors_' + str(len(data) + 1): false_neg_errors,
+					'date_'+str(len(data) + 1): date,
+					'md_'+str(len(data) + 1): md
+				}
+				for j, digit in enumerate(digits):
+					data_dict['image_'+str(len(data) + 1)+'_digit_' + str(j + 1)] = digit
+				data.append(data_dict)
+	if len(data) == 2 and num_of_reliable_images >= 4:
 		data_dict = {**data[0], **data[1]}
 		data_dict['patient_id'] = patient_id
 		data_dict['md_gap'] = data_dict['md_2'] - data_dict['md_1']
@@ -175,13 +184,16 @@ def get_data_for_patient(patient_id):
 		gap = date_2 - date_1
 		data_dict['time_gap'] = gap.days
 		data_dict['md_gap_per_year'] = data_dict['md_gap'] / (gap.days / 365)
+		first_date, last_date = get_datetime(first_date), get_datetime(last_date)
+		gap = last_date - first_date
+		data_dict['total_md_gap_per_year'] = (last_md - first_md) / (gap.days / 365)
 		return data_dict
 	else:
 		return None
 
 
 batch_size = 20
-total_num_patients = 136
+total_num_patients = 351
 for i in range(1, total_num_patients+1, batch_size):
 	batch_patient_data = []
 	for patient_id in range(i, min(i+batch_size, total_num_patients+1)):
